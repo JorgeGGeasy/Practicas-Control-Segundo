@@ -1,6 +1,5 @@
 /* 
 PRACTICA 1: IMPLEMENTACION DE UN CONTROLADOR PARA UN MOTOR DE DC
-
 */
 
 // DECLARACIONES //////////////////////////////////////////////////////////////////////////
@@ -18,8 +17,8 @@ PRACTICA 1: IMPLEMENTACION DE UN CONTROLADOR PARA UN MOTOR DE DC
 #define ACTIVA_P1C
 #define DEBUG_P1C
 //#define ACTIVA_P1C_MED_ANG
-#define ACTIVA_P1D2
-// #define ACTIVA_P1D3
+//#define ACTIVA_P1D2
+#define ACTIVA_P1D3
 
 // Display OLED ///////////////////////////////////////////////////////////////////////////
 #include <Adafruit_SSD1306.h>
@@ -33,7 +32,7 @@ PRACTICA 1: IMPLEMENTACION DE UN CONTROLADOR PARA UN MOTOR DE DC
 
 // TIEMPOS
 #define BLOQUEO_TAREA_LOOPCONTR_MS 10 
-#define BLOQUEO_TAREA_MEDIDA_MS 1000
+#define BLOQUEO_TAREA_MEDIDA_MS 10
 
 // Configuración PWM  ////////////////////////////////////////////////////////////////////
 uint32_t pwmfreq = 1000; // 1KHz
@@ -70,9 +69,9 @@ float interpola_vel_vol_lut(float x); // Interpolacion velocidad/voltios LUT
 #ifdef ACTIVA_P1D2
 #define LONG_LUT 12
 //Vector de tensiones
-const float Vol_LUT[LONG_LUT] = {0, , , 2, 3, 4, 5, 6, 7, 8, 9, 100};
+const float Vol_LUT[LONG_LUT] = {0,1 ,1.5 , 2, 3, 4, 5, 6, 7, 8, 9, 100};
 // Vector de velocidades
-const float Vel_LUT[LONG_LUT] = {0, 0, ...};
+const float Vel_LUT[LONG_LUT] = {0, 2.93, 5.33, 6.75, 8.17, 8.33, 9.17, 9.42, 9.59, 9.75, 9.84, 10};
 #endif
 
 // Variables globales ////////////////////////////////////////////////////////////////////
@@ -87,6 +86,7 @@ float v_medida = 0;    // Valor medido de angulo o velocidad -----------------
 float ref_val = 0;     // Valor de referencia de angulo o velocidad
 int8_t start_stop = 0; //1 -> en funcionamiento | 0 -> parado 
 //float K_p = ;
+float err = 0;
 
 // Declaracion objetos  ////////////////////////////////////////////////////////////////////
 
@@ -186,20 +186,20 @@ void task_config(void *pvParameter) {
       Serial.println(pwm_volt);
 
     }
-    if(variable == r_char){
+    if(valor == r_char){
         ref_val = Serial.parseFloat();
         Serial.print("Valor de referencia = ");
 
         #ifdef ACTIVA_P1C_MED_ANG
         Serial.print(ref_val);
-        Serial.print(" º o ");
+        Serial.print(" º");
         #else
         Serial.print(ref_val);
         Serial.println(" rps");
         #endif
     }
   
-    if(variable == s_char){
+    if(valor == s_char){
         if(start_stop == 1){
         start_stop = 0;
         Serial.print("--STOP--");
@@ -235,9 +235,22 @@ float calculo = 0;
             // Excitacion del motor con PWM
             excita_motor(interpola_vel_vol_lut(ref_val));
             #else
+            #ifdef ACTIVA_P1D3
+            err = ref_val - v_medida;
+            if (err > 0){
+              pwm_volt = pwm_volt + 0.001;
+            }else if (err < 0){
+              pwm_volt = pwm_volt - 0.001;
+            }
+            excita_motor(pwm_volt);
+            #else
             // Excitacion del motor con PWM
             excita_motor(pwm_volt);
             #endif
+
+            #endif
+
+
         }else{
             ang_cnt = 0;
             pwm_motor = 0;
@@ -261,14 +274,14 @@ void task_medidas(void* arg)
 		// Mostrar medidas de angulo y velocidad del motor
 		#ifdef ACTIVA_P1C_MED_ANG // Medida de angulo
             v_medida = v_medida*(180/3.14);
-            Serial.print("Med: ");
-            Serial.println(v_medida);
-            Serial.print("Ref: ");
+            Serial.print("Med:");
+            Serial.print(v_medida);
+            Serial.print(",Ref:");
             Serial.println(ref_val);
 		#else // Medida de velocidad
-            Serial.print("Med: ");
-            Serial.println(v_medida);
-            Serial.print("Ref: ");
+            Serial.print("Med:");
+            Serial.print(v_medida);
+            Serial.print(",Ref:");
             Serial.println(ref_val);
 		#endif
         }
