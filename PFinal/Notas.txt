@@ -1,0 +1,12 @@
+Cp = Kp
+
+Ci = (Ki*Tm)/(1-z^-1)
+
+Cd = (Kd/Tm)*(1-z^-1)
+
+vp[n] = Kp*e[n]
+
+vi[n] = vi[n-1] + Ki*Tm*e[n]
+
+vd[n] = (Kd*(e[n]-e[n-1]))/Tm
+
