@@ -91,12 +91,19 @@ float Ki = Kp;
 float vi = 0;
 float Kd = 0.08;
 float vd = 0;
+float a = 0.8;
 float errAnt = 0;
 float viAnt = 0;
+float vAnt = 0;
+float vdAnt = 0;
 float err = 0;
 float v = 0;
 bool A = false;
-
+bool Zm = false;
+bool Df = false;
+float W = 0;
+float Tm = BLOQUEO_TAREA_LOOPCONTR_MS / 1000.0;
+float Tcb = 0;
 // Declaracion objetos  ////////////////////////////////////////////////////////////////////
 
 xQueueHandle cola_enc;  // Cola encoder
@@ -183,6 +190,11 @@ void task_config(void* pvParameter) {
   char ki_char = 'Ki';
   char kd_char = 'Kd';
   char a_char = 'A';
+  char aminus_char = 'a';
+  char zm_char = 'Zm';
+  char df_char = 'Df';
+  char w_char = 'W';
+  char tcb_char = 'T';
 
   while (1) {
     // Detectar caracter enviado
@@ -213,9 +225,26 @@ void task_config(void* pvParameter) {
         start_stop = 0;
         ref_val = 0;
         v_medida = 0;
+        Kd = 0;
+        Ki = 0;
+        Kp = 0;
+        vp = 0;
+        ang_cnt = 0;
+        errAnt = 0;
+        viAnt = 0;
+        vAnt = 0;
+        vdAnt = 0;
+        err = 0;
+        v = 0;
+        pwm_volt = 0;
         Serial.print("--STOP--");
       } else if (start_stop == 0) {
         start_stop = 1;
+        Kp = 6;
+        vp = 0;
+        Ki = Kp;
+        vi = 0;
+        Kd = 0.08;
         Serial.print("--START--");
       }
     }
@@ -231,15 +260,46 @@ void task_config(void* pvParameter) {
     }
     if (valor == a_char) {
       A = !A;
+      ref_val = 0;
+      ang_cnt = 0;
+      errAnt = 0;
+      viAnt = 0;
+      vAnt = 0;
+      vdAnt = 0;
+      err = 0;
+      v = 0;
+      pwm_volt = 0;
       if (A) {
         Kp = 0.5;
         Ki = Kp;
-        Kd = 0.08;
+        Kd = 0.1;
       } else {
         Kp = 6;
         Ki = Kp;
         Kd = 0.08;
       }
+    }
+
+    if(valor == zm_char){
+      Zm = !Zm;
+    }
+
+    if(valor == df_char){
+      Df = !Df;
+    }
+    if (valor == aminus_char){
+      a = Serial.parseFloat();
+    }
+
+    if(valor == w_char){
+      W = Serial.parseFloat();
+      if(W == 2){
+        Tcb = Kp/(Ki*Tm);
+      }
+    }
+
+    if(valor == tcb_char){
+      Tcb = Serial.parseFloat();
     }
 
     // Activacion de la tarea cada 0.1s
@@ -253,7 +313,6 @@ Tarea del lazo principal del controlador  ######################################
 #ifdef ACTIVA_P1B3
 void task_loopcontr(void* arg) {
   float calculo = 0;
-  float Tm = BLOQUEO_TAREA_LOOPCONTR_MS / 1000.0;
   while (1) {
     if (start_stop == 1) {
       if (A) {
@@ -282,41 +341,57 @@ void task_loopcontr(void* arg) {
 #else
       // Controlar el error y aplicar el voltaje
       err = ref_val - v_medida;
-
-      /*
-            // Anti Windup
-            if(A){ // Para angulo
-
-            }else{ // Para velocidad
-              if(err >= 0.1){
-                  err = 0.1;
-              }
-              else if(err <= -0.1){
-                  err = -0.1;
-              }
-            }
-            */
-
       vp = Kp * err;
-
-      vi = viAnt + Ki * Tm * err;
-      viAnt = vi;
-
       vd = (Kd / Tm) * (err - errAnt);
 
+      // Filtro Derivativo 
+      if(Df){
+        vd = (((vd*(1/a))+vdAnt)/((1+a)/a));
+      }
+      vdAnt = vd;
       errAnt = err;
+      // Sin Windup
+      if(W == 0){
+        vi = viAnt + Ki * Tm * err;
+        v = vp + vi + vd;        
+      }
+      else if(W == 1){
+        // Windup condicional
+        if (v >= 9 || v <= -9){
+          v = vp + vd;
+          if (v<= 0,5 || v>= -0,5){
+            v = 0;
+          }
+        }else{
+          vi = viAnt + Ki * Tm * err;
+          viAnt = vi;
+          v = vp + vi + vd;
+        }
+      }      
+      else if(W == 2){
+        // Windup recalculado
+        if (vAnt >= 9 || vAnt <= -9){
+          vi = Tm*(viAnt + ((Ki*err) - (1/Tcb)*( vAnt - 9 )));
+        }else{
+          vi = Tm*(viAnt + (Ki*err));
+        }
+        v = vp + vi + vd;
+      }
 
-      v = vp + vi + vd;
+      vAnt = v;
+      viAnt = vi;
 
-      // Windup condicional
-      if (v >= 9 || v <= -9){
-        v = vp + vd;
+      // Valor de zona muerta 0.7
+      if(Zm){
+        if ((v<0.30 && v>0) || (v>-0.30 && v<0) ){
+          pwm_volt = 0;
+        }else{
+          pwm_volt = v + 0.7;
+        }
+      }else{
+        pwm_volt = v;
       }
       
-      pwm_volt = v;
-
-      // Windup recalculado
-      // pwm_volt = Tm*((Kp/(Ki*Tm))*err - (1/Tcb)*( vAnt - vRe )) 
       // Excitacion del motor con PWM
       excita_motor(pwm_volt);
 
@@ -329,6 +404,7 @@ void task_loopcontr(void* arg) {
       ang_cnt = 0;
       pwm_motor = 0;
       v_medida = 0;
+      ref_val = 0;
       excita_motor(0);
     }
     // Activacion de la tarea cada 0.01s
@@ -344,13 +420,19 @@ Tarea del lazo principal del controlador  ######################################
 void task_medidas(void* arg) {
   while (1) {
     if (start_stop == 1) {
+      if(Zm){
       // Mostrar medidas de angulo y velocidad del motor
-      Serial.print("Err:");
-      Serial.print(err);
-      Serial.print(",Med:");
+      Serial.print("Med:");
+      Serial.print(pwm_volt);
+      Serial.print(",Ang:");
+      Serial.println(v_medida);
+      }else{
+      // Mostrar medidas de angulo y velocidad del motor
+      Serial.print("Med:");
       Serial.print(v_medida);
       Serial.print(",Ref:");
       Serial.println(ref_val);
+      }
     }
     // Activacion de la tarea cada 1s
     vTaskDelay(BLOQUEO_TAREA_MEDIDA_MS / portTICK_PERIOD_MS);
